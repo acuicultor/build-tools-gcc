@@ -126,6 +126,24 @@ function format_time() {
 }
 
 
+# Date checking for GMP daily snapshot download
+function check_date() {
+    DATE=$(date +%s)
+
+    export TZ=Europe/Berlin
+
+    [[ $(date +%Z) -eq CEST ]] && \
+        DATE=$((DATE - 15600)) || \
+        DATE=$((DATE - 19200))
+
+    DATE=$(date --date=@${DATE} -u +%Y%m%d)
+
+    unset TZ
+
+    echo "${DATE}"
+}
+
+
 # Check if user needs to enter sudo password or not
 function check_sudo() {
     echo
@@ -174,7 +192,7 @@ function setup_variables() {
     # Binary versions
     BINUTILS_git="binutils-2_30-branch"
     BINUTILS_tar="2.30"
-    GMP="gmp-6.1.2"
+    GMP="gmp-6.1.99-$(check_date)"
     MPFR="mpfr-4.0.1"
     MPC="mpc-1.1.0"
     ISL="isl-0.19"
@@ -380,9 +398,9 @@ function download_sources() {
         axel https://www.mpfr.org/mpfr-current/${MPFR}.tar.xz
     fi
 
-    if [[ ! -f ${GMP}.tar.xz ]]; then
+    if [[ ! -f ${GMP}.tar.lz ]]; then
         header "DOWNLOADING GMP"
-        axel https://ftp.gnu.org/gnu/gmp/${GMP}.tar.xz
+        axel https://gmplib.org/download/snapshot/"${GMP}".tar.lz
     fi
 
     if [[ ! -f ${MPC}.tar.gz ]]; then
@@ -459,7 +477,7 @@ function extract() {
 function extract_sources() {
     header "EXTRACTING DOWNLOADED TARBALLS"
     extract ${MPFR}.tar.xz ../${MPFR}
-    extract ${GMP}.tar.xz ../${GMP}
+    extract "${GMP}".tar.lz ../"${GMP}"
     extract ${MPC}.tar.gz ../${MPC}
     extract ${GLIBC}.tar.xz ../${GLIBC}
     extract linux-${LINUX}.tar.xz ../linux
