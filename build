@@ -630,7 +630,8 @@ function build_binutils() {
     ../binutils/configure "${CONFIGURATION[@]}" \
                           --target=${TARGET} \
                           --prefix="${INSTALL}" \
-                          --disable-gdb
+                          --disable-gdb \
+                          CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
     make ${JOBS} || die "Error while building binutils!" -n
     make install ${JOBS} || die "Error while installing binutils!" -n
 }
@@ -653,7 +654,8 @@ function build_gcc() {
     ../gcc/configure "${CONFIGURATION[@]}" \
                      --enable-languages=c \
                      --target=${TARGET} \
-                     --prefix="${INSTALL}"
+                     --prefix="${INSTALL}" \
+                     CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
     make all-gcc ${JOBS} || die "Error while building gcc!" -n
     make install-gcc ${JOBS} || die "Error while installing gcc!" -n
     if [[ ${ARCH} = "x86_64" ]]; then
@@ -674,7 +676,8 @@ function build_glibc() {
                           --host=${TARGET} \
                           --target=${TARGET} \
                           --with-headers="${INSTALL}/${TARGET}/include" \
-                          "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes
+                          "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes \
+                          CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
     make install-bootstrap-headers=yes install-headers ${JOBS} || die "Error installing headers for glibc!" -n
     make csu/subdir_lib ${JOBS} || die "Error while making subdir_lib for glibc!" -n
     install csu/crt1.o csu/crti.o csu/crtn.o "${INSTALL}/${TARGET}/lib"
