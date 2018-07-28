@@ -179,6 +179,7 @@ function setup_variables() {
 
     # Configuration variables
     CONFIGURATION=( "--disable-multilib" "--disable-werror" )
+    FLAGS=( "CFLAGS=-g0 -O2" "CXXFLAGS=-g0 -O2" )
     JOBS="-j$(($(nproc --all) + 1))"
 
     # Binary versions
@@ -621,7 +622,7 @@ function build_binutils() {
                           --target=${TARGET} \
                           --prefix="${INSTALL}" \
                           --disable-gdb \
-                          CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
+                          "${FLAGS[@]}"
     make ${JOBS} || die "Error while building binutils!" -n
     make install ${JOBS} || die "Error while installing binutils!" -n
 }
@@ -645,7 +646,7 @@ function build_gcc() {
                      --enable-languages=c \
                      --target=${TARGET} \
                      --prefix="${INSTALL}" \
-                     CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
+                     "${FLAGS[@]}"
     make all-gcc ${JOBS} || die "Error while building gcc!" -n
     make install-gcc ${JOBS} || die "Error while installing gcc!" -n
     if [[ ${ARCH} = "x86_64" ]]; then
@@ -667,7 +668,7 @@ function build_glibc() {
                           --target=${TARGET} \
                           --with-headers="${INSTALL}/${TARGET}/include" \
                           "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes \
-                          CFLAGS="-g0 -O2" CXXFLAGS="-g0 -O2"
+                          "${FLAGS[@]}"
     make install-bootstrap-headers=yes install-headers ${JOBS} || die "Error installing headers for glibc!" -n
     make csu/subdir_lib ${JOBS} || die "Error while making subdir_lib for glibc!" -n
     install csu/crt1.o csu/crti.o csu/crtn.o "${INSTALL}/${TARGET}/lib"
