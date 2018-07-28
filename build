@@ -528,8 +528,6 @@ function update_repos() {
             git remote update
             git checkout ${ISL_git}
             git reset --hard HEAD
-            [[ ${ISL_git} == master ]] && \
-                patch -Np1 -i "${HOME}"/KudProject/patches/isl/*
             ./autogen.sh
         )
         (
