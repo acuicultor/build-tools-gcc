@@ -136,17 +136,6 @@ function check_date() {
 }
 
 
-# Check if user needs to enter sudo password or not
-function check_sudo() {
-    echo
-    echo "Checking if sudo is available, please enter your password if a prompt appears!"
-    if ! sudo -v 2>/dev/null; then
-        warn "Sudo is not available! Disabling the option for tmpfs..." -n
-        NO_TMPFS=true
-    fi
-}
-
-
 # Unmount tmpfs
 function unmount_tmpfs() {
     if [[ -z ${NO_TMPFS} ]]; then
@@ -178,23 +167,23 @@ function setup_variables() {
     YLW="\033[01;33m"
 
     # Configuration variables
-    CONFIGURATION=( "--disable-multilib" "--disable-werror" )
-    FLAGS=( "CFLAGS=-g0 -O2" "CXXFLAGS=-g0 -O2" )
+    CONFIGURATION=( "--disable-multilib" "--disable-werror"
+                    "CFLAGS=-g0 -O2" "CXXFLAGS=-g0 -O2" )
     JOBS="-j$(($(nproc --all) + 1))"
 
     # Binary versions
-    BINUTILS_git="binutils-2_30-branch"
-    BINUTILS_tar="2.30"
+    BINUTILS_git="master"
+    BINUTILS_tar="2.31.1"
     GMP="gmp-6.1.99-$(check_date)"
     MPFR_svn="trunk"
     MPFR_tar="mpfr-4.0.1"
     MPC_git="master"
     MPC_tar="mpc-1.1.0"
     ISL_git="master"
-    ISL_tar="isl-0.19"
-    GLIBC_git="master"
-    GLIBC_tar="glibc-2.27"
-    LINUX="4.17"
+    ISL_tar="isl-0.20"
+    GLIBC_git="glibc-2.28"
+    GLIBC_tar="glibc-2.28"
+    LINUX="4.18"
 
     # Start of script
     START=$(date +%s)
@@ -225,7 +214,6 @@ function parse_parameters() {
         shift
     done
 
-    [[ -z ${NO_TMPFS} ]] && check_sudo
     [[ -z ${VERBOSE} ]] && exec 6>&2 5>&1 &>/dev/null
     [[ -z ${FULL_SOURCE} ]] && FULL_SOURCE=true
 
@@ -621,11 +609,11 @@ function setup_env() {
 function build_binutils() {
     header "BUILDING BINUTILS"
     cd build-binutils || die "binutils build folder does not exist!"
-    ../binutils/configure "${CONFIGURATION[@]}" \
-                          --target=${TARGET} \
+    ../binutils/configure --target=${TARGET} \
                           --prefix="${INSTALL}" \
                           --disable-gdb \
-                          "${FLAGS[@]}"
+                          --enable-gold \
+                          "${CONFIGURATION[@]}"
     make ${JOBS} || die "Error while building binutils!" -n
     make install ${JOBS} || die "Error while installing binutils!" -n
 }
@@ -645,11 +633,10 @@ function build_headers() {
 function build_gcc() {
     header "MAKING GCC"
     cd ../build-gcc || die "GCC build folder does not exist!"
-    ../gcc/configure "${CONFIGURATION[@]}" \
-                     --enable-languages=c \
+    ../gcc/configure --enable-languages=c \
                      --target=${TARGET} \
                      --prefix="${INSTALL}" \
-                     "${FLAGS[@]}"
+                     "${CONFIGURATION[@]}"
     make all-gcc ${JOBS} || die "Error while building gcc!" -n
     make install-gcc ${JOBS} || die "Error while installing gcc!" -n
     if [[ ${ARCH} = "x86_64" ]]; then
@@ -670,8 +657,7 @@ function build_glibc() {
                           --host=${TARGET} \
                           --target=${TARGET} \
                           --with-headers="${INSTALL}/${TARGET}/include" \
-                          "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes \
-                          "${FLAGS[@]}"
+                          "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes
     make install-bootstrap-headers=yes install-headers ${JOBS} || die "Error installing headers for glibc!" -n
     make csu/subdir_lib ${JOBS} || die "Error while making subdir_lib for glibc!" -n
     install csu/crt1.o csu/crti.o csu/crtn.o "${INSTALL}/${TARGET}/lib"
