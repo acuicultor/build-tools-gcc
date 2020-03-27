@@ -42,15 +42,18 @@ function help_menu() {
     echo
     echo "${BOLD}USAGE:${RST} ${0} <options>"
     echo
-    echo "${BOLD}EXAMPLE:${RST} ${0} -a arm64 -s linaro -v 7"
+    echo "${BOLD}EXAMPLE:${RST} ${0} -a arm64 -s linaro -v 8"
+    echo
+    echo "${BOLD}EXAMPLE:${RST} ${0} -a x86_64 -s gnu -v 8"
     echo
     echo "${BOLD}REQUIRED PARAMETERS:${RST}"
     echo "  -a  | --arch:        Possible values: arm, arm64, i686, or x86_64. This is the toolchain's target architecture."
     echo "  -s  | --source:      Possible values: gnu or linaro. This is the GCC source (GNU official vs. Linaro fork)."
-    echo "  -v  | --version:     Possible values: (4, 5, 6, 7, 8*, and 9* [*GNU only]). This is the GCC version to build."
+    echo "  -v  | --version:     Possible values: (4, 5, 6, 7, 8, 9*, and 10* [*GNU only]). This is the GCC version to build."
     echo
     echo "${BOLD}OPTIONAL PARAMETERS:${RST}"
     echo "  -f  | --full-src:    Download full git repos instead of shallow clones"
+    echo "  -j  | --jobs:        Specify the amount of threads to use. This overrides the default detection"
     echo "  -nt | --no-tmpfs:    Do not use tmpfs for building (useful if you don't have much RAM)."
     echo "  -nu | --no-update:   Do not update the downloaded components before building (useful if you have slow internet)."
     echo "  -p  | --package:     Possible values: gz or xz. Compresses toolchain after build."
@@ -170,16 +173,17 @@ function setup_variables() {
     # Configuration variables
     CONFIGURATION=( "--disable-multilib" "--disable-werror" )
     JOBS="-j$(($(nproc --all) + 1))"
+    DEPTH_FLAG=true
 
     # Binary versions
-    BINUTILS_git="binutils-2_31-branch"
-    BINUTILS_tar="2.31"
-    GMP="gmp-6.1.2"
-    MPFR="mpfr-4.0.1"
+    BINUTILS_git="binutils-2_34-branch"
+    BINUTILS_tar="2.34"
+    GMP="gmp-6.2.0"
+    MPFR="mpfr-4.0.2"
     MPC="mpc-1.1.0"
-    ISL="isl-0.20"
-    GLIBC="glibc-2.28"
-    LINUX="4.18"
+    ISL="isl-0.22.1"
+    GLIBC="glibc-2.31"
+    LINUX="5.4.25"
 
     # Start of script
     START=$(date +%s)
@@ -196,7 +200,8 @@ function parse_parameters() {
             "-v"|"--version") shift && VERSION=${1} ;;
 
             # OPTIONAL FLAGS
-            "-f"|"--full-src") FULL_SOURCE=true ;;
+            "-f"|"--full-src") DEPTH_FLAG=false ;;
+            "-j"|"--jobs") shift && JOBS=-j${1} ;;
             "-nt"|"--no-tmpfs") NO_TMPFS=true ;;
             "-nu"|"--no-update") NO_UPDATE=true ;;
             "-p"|"--package") shift && COMPRESSION=${1} ;;
@@ -212,55 +217,78 @@ function parse_parameters() {
 
     [[ -z ${NO_TMPFS} ]] && check_sudo
     [[ -z ${VERBOSE} ]] && exec 6>&2 5>&1 &>/dev/null
-    [[ -z ${FULL_SOURCE} ]] && DEPTH_FLAG=true
 
     # Default values
     case "${ARCH}" in
         "arm") TARGET="arm-linux-gnueabi" ;;
         "arm64") TARGET="aarch64-linux-gnu" ;;
         "i686") TARGET="i686-linux-gnu" ;;
-        "x86_64") TARGET="x86_64-linux-gnu" ;;
+        "x86_64") [[ ${VERSION} -le 5 ]] && die "Will not build, Use newer version instead" -n
+                  TARGET="x86_64-linux-gnu" ;;
         *) die "Absent or invalid arch specified!" -h ;;
     esac
+
+    # Kernel architecture; i686 and x86_64 targets use x86
+    [[ ${ARCH} = "i686" || ${ARCH} = "x86_64" ]] && KERNEL_ARCH=x86 || KERNEL_ARCH=${ARCH}
 
     if [[ -z ${TARBALLS} ]]; then
         # Set GCC branch based on version and Linaro or not
         case "${SOURCE}:${VERSION}" in
-            "gnu:4") die "Will not build, Use Linaro instead" ;;
+            "gnu:4") GCC=gcc-4_9-branch
+                     BINUTILS_git="binutils-2_29-branch"
+                     GLIBC="glibc-2.26"
+                     ISL="isl-0.17.1" ;;
             "gnu:5") GCC=gcc-5-branch
+                     GLIBC="glibc-2.27"
                      ISL="isl-0.17.1" ;;
             "gnu:6") GCC=gcc-6-branch ;;
             "gnu:7") GCC=gcc-7-branch ;;
             "gnu:8") GCC=gcc-8-branch ;;
-            "gnu:9") GCC=master ;;
+            "gnu:9") GCC=gcc-9-branch ;;
+            "gnu:10") GCC=master ;;
             "linaro:4") GCC=linaro-local/releases/linaro-4.9-2017.01
+                        GLIBC="glibc-2.27"
                         ISL="isl-0.17.1" ;;
             "linaro:5") GCC=linaro-local/gcc-5-integration-branch
+                        GLIBC="glibc-2.27"
                         ISL="isl-0.17.1" ;;
             "linaro:6") GCC=linaro-local/gcc-6-integration-branch ;;
             "linaro:7") GCC=linaro-local/gcc-7-integration-branch ;;
-            "linaro:8") die "There's no such thing as Linaro 8.x Clannad..." -h ;;
+            # ARM has taken the responsibility from Linaro since 8.x
+            "linaro:8") GCC=linaro-local/ARM/arm-8-branch ;;
             "linaro:9") die "There's no such thing as Linaro 9.x Clannad..." -h ;;
+            "linaro:10") die "There's no such thing as Linaro 10.x Clannad..." -h ;;
             *) die "Absent or invalid GCC version or source specified!" -h ;;
         esac
     else
         # Set GCC branch based on version and Linaro or not
         case "${SOURCE}:${VERSION}" in
-            "gnu:4") die "Will not build, Use Linaro instead" ;;
+            "gnu:4") GCC=gcc-4.9.4
+                     BINUTILS_tar="2.29.1"
+                     GLIBC="glibc-2.26"
+                     ISL="isl-0.17.1"
+                     EXT=gz ;;
             "gnu:5") GCC=gcc-5.5.0
+                     GLIBC="glibc-2.27"
                      ISL="isl-0.17.1" ;;
-            "gnu:6") GCC=gcc-6.4.0 ;;
-            "gnu:7") GCC=gcc-7.3.0 ;;
-            "gnu:8") GCC=gcc-8.2.0 ;;
-            "gnu:9") die "GCC 9.0 is currently a WIP so there is no tarball to download! Either use the git repo or choose a new version..." ;;
+            "gnu:6") GCC=gcc-6.5.0 ;;
+            "gnu:7") GCC=gcc-7.4.0 ;;
+            "gnu:8") GCC=gcc-8.3.0 ;;
+            "gnu:9") GCC=gcc-9.1.0 ;;
+            "gnu:10") die "GCC 10.0 is currently a WIP so there is no tarball to download! Either use the git repo or choose a new version..." ;;
             "linaro:4") GCC=linaro-4.9-2017.01
+                        GLIBC="glibc-2.27"
                         ISL="isl-0.17.1" ;;
             "linaro:5") GCC=linaro-5.5-2017.10
+                        GLIBC="glibc-2.27"
                         ISL="isl-0.17.1" ;;
-            "linaro:6") GCC=linaro-snapshot-6.4-2018.06 ;;
-            "linaro:7") GCC=linaro-snapshot-7.3-2018.06 ;;
-            "linaro:8") die "There's no such thing as Linaro 8.x Clannad..." -h ;;
+            "linaro:6") GCC=linaro-snapshot-6.5-2018.11 ;;
+            "linaro:7") GCC=linaro-snapshot-7.4-2019.01 ;;
+            # ARM has taken the responsibility from Linaro since 8.x
+            # See later in this script why it's defined like this
+            "linaro:8") GCC=8.3-2019.03 ;;
             "linaro:9") die "There's no such thing as Linaro 9.x Clannad..." -h ;;
+            "linaro:10") die "There's no such thing as Linaro 10.x Clannad..." -h ;;
             *) die "Absent or invalid GCC version or source specified!" -h ;;
         esac
     fi
@@ -272,7 +300,7 @@ function clean_up() { #FIXME: we dont need to remove everything everytime.
     header "CLEANING UP"
 
     unmount_tmpfs
-    git clean -fxdq -e sources -e prebuilts
+    git clean -fxdq -e sources -e prebuilts -e patches
     find . -maxdepth 1 -type l -exec rm -rf {} \; #FIXME
     if [[ -d binutils ]] ||
        [[ -d build-binutils ]] ||
@@ -295,6 +323,19 @@ function build_binaries() {
     PREBUILTS_BIN=${ROOT}/prebuilts/bin
     mkdir -p sources
 
+    if [[ ! -f ${PREBUILTS_BIN}/txt2man ]]; then
+        TXT2MAN=${ROOT}/sources/txt2man
+        [[ ! -d ${TXT2MAN} ]] && git -C "$(dirname "${TXT2MAN}")" clone --depth=1 https://github.com/mvertes/txt2man
+        git -C "${TXT2MAN}" clean -fxdq
+        git -C "${TXT2MAN}" pull
+        (
+            cd "${TXT2MAN}" || die "Issue with cloning txt2man source!"
+            make prefix="$(dirname "${PREBUILTS_BIN}")" install || die "Error installing txt2man!"
+        )
+    fi
+
+    export PATH=${PREBUILTS_BIN}:${PATH}
+
     if [[ ! -f ${PREBUILTS_BIN}/axel ]]; then
         AXEL=${ROOT}/sources/axel
         [[ ! -d ${AXEL} ]] && git -C "$(dirname "${AXEL}")" clone --depth=1 https://github.com/axel-download-accelerator/axel
@@ -302,10 +343,10 @@ function build_binaries() {
         git -C "${AXEL}" pull
         (
             cd "${AXEL}" || die "Issue with cloning axel source!"
-            ./autogen.sh
+            autoreconf -fiv
             ./configure --prefix="$(dirname "${PREBUILTS_BIN}")"
-            make ${JOBS} || die "Error building axel!"
-            make ${JOBS} install || die "Error installing axel!"
+            make "${JOBS}" || die "Error building axel!"
+            make "${JOBS}" install || die "Error installing axel!"
         )
     fi
 
@@ -314,20 +355,18 @@ function build_binaries() {
         [[ ! -d ${PIGZ} ]] && git -C "$(dirname "${PIGZ}")" clone --depth=1 https://github.com/madler/pigz
         git -C "${PIGZ}" clean -fxdq
         git -C "${PIGZ}" pull
-        make -C "${PIGZ}" ${JOBS} pigz || die "Error building pigz!"
+        make -C "${PIGZ}" "${JOBS}" pigz || die "Error building pigz!"
         mv "${PIGZ}"/pigz "${PREBUILTS_BIN}"
     fi
 
     if [[ ! -f ${PREBUILTS_BIN}/pxz ]]; then
         PXZ=${ROOT}/sources/pxz
-        [[ ! -d ${PXZ} ]] && git -C "$(dirname "${PXZ}")" clone --depth=1 https://github.com/jnovy/pxz
+        [[ ! -d ${PXZ} ]] && git -C "$(dirname "${PXZ}")" clone --depth=1 https://github.com/krasCGQ/pxz
         git -C "${PXZ}" clean -fxdq
         git -C "${PXZ}" pull
-        make -C "${PXZ}" ${JOBS} pxz || die "Error building pxz!"
+        make -C "${PXZ}" "${JOBS}" pxz || die "Error building pxz!"
         mv "${PXZ}"/pxz "${PREBUILTS_BIN}"
     fi
-
-    export PATH=${PREBUILTS_BIN}:${PATH}
 }
 
 
@@ -335,7 +374,7 @@ function download_sources() {
     cd sources || die "Failed to create sources directory!"
 
     if [[ ! -f ${MPFR}.tar.xz ]]; then
-        header "DOWNLOADING MPR"
+        header "DOWNLOADING MPFR"
         axel https://www.mpfr.org/mpfr-current/${MPFR}.tar.xz
     fi
 
@@ -350,13 +389,13 @@ function download_sources() {
     fi
 
     if [[ ! -f ${GLIBC}.tar.xz ]]; then
-        header "DOWNLOADING GLIBC"
+        header "DOWNLOADING GLIBC ${GLIBC} FOR GCC ${VERSION}"
         axel https://ftp.gnu.org/gnu/glibc/${GLIBC}.tar.xz
     fi
 
     if [[ ! -f linux-${LINUX}.tar.xz ]]; then
         header "DOWNLOADING LINUX KERNEL"
-        axel https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${LINUX}.tar.xz
+        axel https://cdn.kernel.org/pub/linux/kernel/v${LINUX/.*}.x/linux-${LINUX}.tar.xz
     fi
 
     if [[ -z ${TARBALLS} ]]; then
@@ -367,7 +406,8 @@ function download_sources() {
 
         if [[ ! -d isl ]]; then
             header "DOWNLOADING ISL"
-            git_clone git://repo.or.cz/isl.git -b ${ISL}
+            # don't use git_clone
+            git clone git://repo.or.cz/isl.git
         fi
 
         if [[ ! -d gcc ]]; then
@@ -376,7 +416,7 @@ function download_sources() {
         fi
     else
         if [[ ! -f binutils-${BINUTILS_tar}.tar.xz ]]; then
-            header "DOWNLOADING BINUTILS"
+            header "DOWNLOADING BINUTILS ${BINUTILS_tar} FOR GCC ${VERSION}"
             axel https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_tar}.tar.xz
         fi
 
@@ -385,12 +425,21 @@ function download_sources() {
             axel http://isl.gforge.inria.fr/${ISL}.tar.xz
         fi
 
-        if [[ ${SOURCE} == "gnu" ]]; then
+        # GNU, any version
+        if [[ ${SOURCE} = "gnu" ]]; then
             if [[ ! -f ${GCC}.tar.${EXT:-xz} ]]; then
                 header "DOWNLOADING GCC"
-                axel https://mirrors.kernel.org/gnu/gcc/${GCC}/${GCC}.tar."${EXT:-gz}"
+                axel https://mirrors.kernel.org/gnu/gcc/${GCC}/${GCC}.tar.${EXT:-xz}
             fi
-            GCC_TAR=${GCC}.tar.${EXT:-gz}
+            GCC_TAR=${GCC}.tar.${EXT:-xz}
+        # Linaro, 8.x and newer
+        elif [[ ${VERSION} -ge 8 ]]; then
+            if [[ ! -f gcc-arm-src-snapshot-${GCC}.tar.xz ]]; then
+                header "DOWNLOADING GCC"
+                axel https://developer.arm.com/-/media/Files/downloads/gnu-a/${GCC}/srcrel/gcc-arm-src-snapshot-${GCC}.tar.xz
+            fi
+            GCC_TAR=gcc-arm-src-snapshot-${GCC}.tar.xz
+        # Linaro, 7.x and older
         else
             if [[ ! -f gcc-${GCC}.tar.gz ]]; then
                 header "DOWNLOADING GCC"
@@ -424,7 +473,14 @@ function extract_sources() {
     if [[ -n ${TARBALLS} ]]; then
         extract binutils-${BINUTILS_tar}.tar.xz ../binutils
         extract ${ISL}.tar.xz ../${ISL}
-        extract ${GCC_TAR} ../gcc
+        if [[ ${SOURCE} = "linaro" && ${VERSION} -ge 8 ]]; then
+            # We can't use extract function here as this ships other GNU tools
+            # Only extract GCC source and later rename it to gcc
+            pxz -d < ${GCC_TAR} | tar -xC .. gcc-arm-src-snapshot-${GCC}
+            mv -f ../gcc-arm-src-snapshot-${GCC} ../gcc
+        else
+            extract ${GCC_TAR} ../gcc
+        fi
     fi
 }
 
@@ -436,23 +492,20 @@ function update_repos() {
         (
             cd isl || die "ISL did not get cloned properly!"
             git remote update
-            git checkout ${ISL}
-            git reset --hard HEAD
+            git checkout -f ${ISL}
             ./autogen.sh
         )
         (
             cd binutils || die "binutils did not get cloned properly!"
             [[ -n ${FULL_SOURCE} ]] && BRANCH=origin/${BINUTILS_git} || BRANCH=FETCH_HEAD
             git_fetch origin ${BINUTILS_git}
-            git checkout ${BINUTILS_git} || git checkout -b ${BINUTILS_git} ${BRANCH}
-            git reset --hard ${BRANCH}
+            git checkout -f ${BINUTILS_git} || git checkout -f -b ${BINUTILS_git} ${BRANCH}
         )
         (
             cd gcc || die "GCC did not get cloned properly!"
             [[ -n ${FULL_SOURCE} ]] && BRANCH=origin/${GCC} || BRANCH=FETCH_HEAD
             git_fetch origin ${GCC}
-            git checkout ${GCC} || git checkout -b ${GCC} ${BRANCH}
-            git reset --hard ${BRANCH}
+            git checkout -f ${GCC} || git checkout -f -b ${GCC} ${BRANCH}
         )
     else
         if [[ -d isl ]]; then
@@ -465,7 +518,6 @@ function update_repos() {
 
     cd ..
 
-    [[ ! -d linux ]] && ln -s sources/linux linux
     [[ ! -d binutils ]] && ln -s sources/binutils binutils
     [[ ! -d gcc ]] && ln -s sources/gcc gcc
 }
@@ -497,6 +549,23 @@ function setup_env() {
     else
         ln -s -f "${ROOT}/isl" isl
     fi
+
+    if [[ ${VERSION} -eq 4 ]]; then
+        # GCC 4.9 (ARM/i686): error: ‘SIGSEGV' was not declared in this scope
+        GCC_PATCH="942-asan-fix-missing-include-signal-h"
+    elif [[ ${VERSION} -ge 6 ]] && [[ ${VERSION} -le 8 ]]; then
+        # GCC 6-8 (i686): error: ‘PATH_MAX' undeclared here (not in a function)
+        GCC_PATCH="GCC_6-8"
+    elif [[ ${VERSION} -eq 9 ]]; then
+        # GNU GCC 9: error: ‘PATH_MAX' was not declared on this scope
+        GCC_PATCH="GCC_9"
+    else
+        # GNU GCC 10 (any): error: ‘PATH_MAX' was not declared on this scope
+        GCC_PATCH="GCC_10_up"
+    fi
+
+    patch -Np1 < "${ROOT}"/patches/${GCC_PATCH}.patch || die "Failed to patch GCC source!"
+
     cd ..
 
     if [[ -z ${VERBOSE} ]]; then
@@ -515,8 +584,8 @@ function build_binutils() {
                           --target=${TARGET} \
                           --prefix="${INSTALL}" \
                           --disable-gdb
-    make ${JOBS} || die "Error while building binutils!" -n
-    make install ${JOBS} || die "Error while installing binutils!" -n
+    make "${JOBS}" || die "Error while building binutils!" -n
+    make install "${JOBS}" || die "Error while installing binutils!" -n
 }
 
 
@@ -524,9 +593,9 @@ function build_binutils() {
 function build_headers() {
     header "MAKING LINUX HEADERS"
     cd ../linux || die "Linux kernel folder does not exist!"
-    make ARCH="${ARCH}" \
+    make ARCH="${KERNEL_ARCH}" \
         INSTALL_HDR_PATH="${INSTALL}/${TARGET}" \
-        headers_install ${JOBS} || die "Error while building/installing Linux headers!" -n
+        headers_install "${JOBS}" || die "Error while building/installing Linux headers!" -n
 }
 
 
@@ -535,14 +604,14 @@ function build_gcc() {
     header "MAKING GCC"
     cd ../build-gcc || die "GCC build folder does not exist!"
     ../gcc/configure "${CONFIGURATION[@]}" \
-                     --enable-languages=c \
+                     --enable-languages=c,c++ \
                      --target=${TARGET} \
                      --prefix="${INSTALL}"
-    make all-gcc ${JOBS} || die "Error while building gcc!" -n
-    make install-gcc ${JOBS} || die "Error while installing gcc!" -n
+    make all-gcc "${JOBS}" || die "Error while building gcc!" -n
+    make install-gcc "${JOBS}" || die "Error while installing gcc!" -n
     if [[ ${ARCH} = "x86_64" ]]; then
-        make all-target-libgcc ${JOBS} || die "Error while installing libgcc for host!" -n
-        make install-target-libgcc ${JOBS} || die "Error while installing libgcc for target!" -n
+        make all-target-libgcc "${JOBS}" || die "Error while installing libgcc for host!" -n
+        make install-target-libgcc "${JOBS}" || die "Error while installing libgcc for target!" -n
     fi
 }
 
@@ -557,22 +626,22 @@ function build_glibc() {
                           --target=${TARGET} \
                           --with-headers="${INSTALL}/${TARGET}/include" \
                           "${CONFIGURATION[@]}" libc_cv_forced_unwind=yes
-    make install-bootstrap-headers=yes install-headers ${JOBS} || die "Error installing headers for glibc!" -n
-    make csu/subdir_lib ${JOBS} || die "Error while making subdir_lib for glibc!" -n
+    make install-bootstrap-headers=yes install-headers "${JOBS}" || die "Error installing headers for glibc!" -n
+    make csu/subdir_lib "${JOBS}" || die "Error while making subdir_lib for glibc!" -n
     install csu/crt1.o csu/crti.o csu/crtn.o "${INSTALL}/${TARGET}/lib"
     ${TARGET}-gcc -nostdlib -nostartfiles -shared -x c /dev/null -o "${INSTALL}/${TARGET}/lib/libc.so"
     touch "${INSTALL}/${TARGET}/include/gnu/stubs.h"
-    if [[ ${ARCH} = "x86_64" || ${ARCH} = "i686" ]]; then
-        make ${JOBS} || die "Error while building glibc for the host!" -n
-        make install ${JOBS} || die "Error while installing glibc for the host!" -n
+    if [[ ${ARCH} = "x86_64" ]]; then
+        make "${JOBS}" || die "Error while building glibc for the host!" -n
+        make install "${JOBS}" || die "Error while installing glibc for the host!" -n
     else
         cd ../build-gcc || die "GCC build folder does not exist!"
-        make all-target-libgcc ${JOBS} || die "Error while building libgcc for target!" -n
-        make install-target-libgcc ${JOBS} || die "Error while installing libgcc for target!" -n
+        make all-target-libgcc "${JOBS}" || die "Error while building libgcc for target!" -n
+        make install-target-libgcc "${JOBS}" || die "Error while installing libgcc for target!" -n
 
         cd ../build-glibc || die "glibc build folder does not exist!"
-        make ${JOBS} || die "Error while building glibc for target" -n
-        make install ${JOBS} || die "Error while installing glibc for target" -n
+        make "${JOBS}" || die "Error while building glibc for target" -n
+        make install "${JOBS}" || die "Error while installing glibc for target" -n
     fi
 }
 
@@ -581,8 +650,8 @@ function build_glibc() {
 function install_gcc() {
     header "INSTALLING GCC"
     cd ../build-gcc || die "GCC build folder does not exist!"
-    make all ${JOBS} || die "Error while compiling final toolchain!" -n
-    make install ${JOBS} || die "Error while installing final toolchain!" -n
+    make all "${JOBS}" || die "Error while compiling final toolchain!" -n
+    make install "${JOBS}" || die "Error while installing final toolchain!" -n
     cd ..
 }
 

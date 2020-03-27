@@ -12,8 +12,8 @@ following:
 + A Linux distribution (the script has been tested on Ubuntu 17.04 and Arch Linux)
 + A decent processor and RAM (i5 and 8GB of RAM or more is preferred)
 + Core developer packages
-    + For Arch: the base-devel package should be enough
-    + For Ubuntu: ```sudo apt-get install flex bison ncurses-dev texinfo gcc gperf patch libtool automake g++ libncurses5-dev gawk subversion expat libexpat1-dev python-all-dev binutils-dev libgcc1:i386 bc libcloog-isl-dev libcap-dev autoconf libgmp-dev build-essential gcc-multilib g++-multilib pkg-config libmpc-dev libmpfr-dev autopoint gettext txt2man liblzma-dev libssl-dev libz-dev```
+    + For Arch: ```sudo pacman -S base-devel git```
+    + For Ubuntu: ```sudo apt-get install flex bison ncurses-dev texinfo gcc gperf patch libtool automake g++ libncurses5-dev gawk expat libexpat1-dev python-all-dev binutils-dev libgcc1:i386 bc libcloog-isl-dev libcap-dev autoconf autoconf-archive libgmp-dev build-essential gcc-multilib g++-multilib pkg-config libmpc-dev libmpfr-dev autopoint gettext liblzma-dev libssl-dev libz-dev```
 
 Once you have set up your environment, run the following:
 
@@ -28,14 +28,14 @@ The printout will show you how to run the script.
 Example commands:
 
 ```bash
-# Build a Linaro 7.x toolchain for x86_64
-./build -a x86_64 -s linaro -v 7
+# Build a GNU 8.x toolchain for x86_64
+./build -a x86_64 -s gnu -v 8 -V
 
 # Build a Linaro 7.x toolchain for arm64
-./build -a arm64 -s linaro -v 7
+./build -a arm64 -s linaro -v 7 -V
 
-# Build a GNU 5.x toolchain for arm
-./build -a arm -s gnu -v 5
+# Build a Linaro 5.x toolchain for arm
+./build -a arm -s linaro -v 5 -V
 ```
 
 ## After compilation
